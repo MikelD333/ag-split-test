@@ -4,6 +4,14 @@
   var initialized = false
   var eventQueue = []
 
+  // Metrics state
+  var metrics = {
+    clicks: 0,
+    completed: false,
+    startTime: null,
+    friction_score: 0
+  }
+
   function now() {
     return new Date().toISOString()
   }
@@ -42,13 +50,25 @@
     }
   }
 
+  function getMetrics() {
+    return {
+      clicks: metrics.clicks,
+      completed: metrics.completed,
+      duration_ms: metrics.startTime ? Date.now() - metrics.startTime : 0,
+      friction_score: metrics.friction_score
+    }
+  }
+
   function getBasePayload(eventName, payload) {
     return {
+      campaign_id: config.campaignId,
       campaignId: config.campaignId,
       sessionId: config.sessionId,
       variant: config.variant,
       event: eventName,
       payload: payload || {},
+      metrics: getMetrics(),
+      success_event: config.successEvent || null,
       page: {
         href: window.location.href,
         origin: window.location.origin,
@@ -143,6 +163,8 @@
           return
         }
 
+        metrics.clicks++
+
         sendEvent("click", {
           element: getElementData(target),
           x: event.clientX,
@@ -175,6 +197,8 @@
 
   function listenErrors() {
     window.addEventListener("error", function (event) {
+      metrics.friction_score++
+
       sendEvent("javascript_error", {
         message: safeString(event.message, 500),
         filename: safeString(event.filename, 300),
@@ -184,6 +208,8 @@
     })
 
     window.addEventListener("unhandledrejection", function (event) {
+      metrics.friction_score++
+
       sendEvent("unhandled_rejection", {
         reason: safeString(event.reason && (event.reason.stack || event.reason.message || event.reason), 800)
       })
@@ -248,8 +274,11 @@
       campaignId: userConfig.campaignId,
       sessionId: userConfig.sessionId,
       variant: userConfig.variant,
+      successEvent: userConfig.successEvent || "",
       debug: Boolean(userConfig.debug)
     }
+
+    metrics.startTime = Date.now()
 
     initialized = true
 
@@ -272,11 +301,19 @@
   }
 
   AgentSplit.completeTask = function (payload) {
-    sendEvent("task_completed", payload || {})
+    metrics.completed = true
+    var data = payload || {}
+    data.success_event = config ? config.successEvent : null
+    sendEvent("task_completed", data)
   }
 
   AgentSplit.failTask = function (payload) {
+    metrics.completed = false
     sendEvent("task_failed", payload || {})
+  }
+
+  AgentSplit.getMetrics = function () {
+    return getMetrics()
   }
 
   AgentSplit.identify = function (payload) {
